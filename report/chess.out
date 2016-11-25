@@ -1,0 +1,10 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{Running the code}{}% 2
+\BOOKMARK [1][-]{section.3}{Opening book}{}% 3
+\BOOKMARK [1][-]{section.4}{Minimax}{}% 4
+\BOOKMARK [2][-]{subsection.4.1}{Iterative-deepening}{section.4}% 5
+\BOOKMARK [2][-]{subsection.4.2}{Alpha-beta pruning}{section.4}% 6
+\BOOKMARK [3][-]{subsubsection.4.2.1}{Quiescence Search}{subsection.4.2}% 7
+\BOOKMARK [3][-]{subsubsection.4.2.2}{Move ordering}{subsection.4.2}% 8
+\BOOKMARK [3][-]{subsubsection.4.2.3}{Null-move pruning}{subsection.4.2}% 9
+\BOOKMARK [2][-]{subsection.4.3}{Evaluation function with Transposition Table}{section.4}% 10

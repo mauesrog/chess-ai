@@ -1,0 +1,247 @@
+\documentclass{article}
+\usepackage{full page, listings, graphicx, cprotect, csquotes, cleveref, fancyvrb, hanging, hyperref}
+\usepackage[labelfont=bf]{caption}
+\lstset{
+numbers=left, 
+numberstyle=\small, 
+numbersep=8pt, 
+frame = single, 
+language=Java, 
+framexleftmargin=20pt}
+\newenvironment{nscenter}
+ {\margin=0.5pt\parskip=0pt\par\nopagebreak\centering}
+ {\par\noindent\ignorespacesafterend}
+
+% set the document title, author, and date here.
+%  once set, the \maketitle command (within the document)
+%  will display them nicely
+\title{Chess}
+\author{Mauricio Esquivel Rogel}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+I implemented an iterative deepening minimax search with the following extensions: alpha-beta pruning, transposition table, null-move pruning, quiescence search with delta pruning, opening book, and move ordering. 
+
+\section{Running the code} \label{sec:run}
+Open the project in Eclipse and run \verb`ChessClient.java`. Unfortunately, I wasn't able to fix a compiling bug when you first add the project to Eclipse that tells you some library can't be found. To fix that, you just go to the \verb`chai` package right-click menu, and then: \textbf{Build path $>$  Configure Build Path...$>$ Libraries $>$} Select \textbf{JRE System Library [Java}... \textbf{$>$ Add Library... $>$ JRE System Library $>$} Check \textbf{Workspace default JRE}... \textbf{$>$ Finish $>$ Apply}.
+
+\section{Opening book}
+As suggested in \textit{Artificial Intelligence: A modern approach}, I decided that for the first 10 plys, the computer will actually attempt to make the moves directly out of some game from the opening-book. Here is the code for this:\\
+
+\begin{lstlisting}[firstnumber=150]
+// Get the first 10 moves from the opening book but stop if at
+// any point the move is invalid or not quiescent, then start using
+// AI
+if (position.getPlyNumber() < 10 && !invalidMove) {
+  opening.goForward();
+  short move = opening.getNextMove().getShortMoveDesc();
+  boolean empty = position.isSquareEmpty(Move.getToSqi(move)),
+    sacrifice = false, capture = Move.isCapturing(move),
+      recapture;
+  
+  position.doMove(move);
+  opening.goForward();
+
+  if (!position.isLegal() || !empty) {
+    position.undoMove();
+    invalidMove = true;
+    return IDMinimaxSerach(position);
+  }
+  
+  Double v = eval(position, 0);
+  
+  recapture = position.getAllCapturingMoves().length > 0;
+  sacrifice = recapture ? !capture : quiescenceSearch(position, 
+    Double.NEGATIVE_INFINITY, 
+      Double.POSITIVE_INFINITY, 0) <= v;
+  
+  // check if the horizon effect makes this a bad move
+  if (sacrifice) {
+    position.undoMove();
+    invalidMove = true;
+    return IDMinimaxSerach(position);
+  }
+  
+  position.undoMove();
+  return move;
+}
+\end{lstlisting}
+As the code shows, there is a lot of move validation going on. Invalid moves are immediately rejected, and they trigger a normal search as soon as their detected in lines 163-167. On the other hand, non-quiescent moves are too risky to allow, so we also run a small \textsc{Quiescent-Search} (see \ref{subsubsec:quiet}) and resort to a full, normal search if necessary (lines 171-181).
+\section{Minimax}
+To show how I implement the search, I will split it into subsections for each extension:
+
+\subsection{Iterative-deepening}
+\textsc{ID-Minimax-Serach} runs the iterations of the search, and \textsc{Minimax-Alpha-Beta-Serach} starts the depth-limited Minimax search. 
+
+\subsection{Alpha-beta pruning}
+{\it Implemented from \textbf{Artificial Intelligence: A modern approach}}\\ \\
+The calls to \textsc{Max-Value}(position, d, maxDepth, a, b) and \textsc{Min-Value}(position, d, maxDepth, a, b) take alpha, a, and beta, b, parameters to recursively find that best possible solution up to the max-depth. Each method starts out by checking if the search should terminate with the cutoff test,\\
+\begin{lstlisting}[firstnumber=268]
+// CUTOFF test with quiescence search
+    if (cutoffTest(position, d, maxDepth)) {
+      Double value = eval(position, d), q;
+      
+      if (position.isStaleMate()) {
+value = 0.0;
+      }  else if (position.isTerminal() && position.isMate()) {
+value = position.getToPlay() == computerId ? 
+    Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+      } else if 
+(Move.isCapturing(position.getLastMove().getShortMoveDesc()) &&
+  (q = quiescenceSearch(position, Double.NEGATIVE_INFINITY, 
+    Double.POSITIVE_INFINITY, d)) < value) {
+value = q; 
+      }
+      
+      return value;
+    }
+\end{lstlisting}
+
+Here, given that the current position terminates the search, we check if this is a win, a draw, a loss, or simply the cutoff evaluation. This code is from \textsc{Max-Value}, but the \textsc{Min-Value} version is analogous.
+
+\subsubsection{Quiescence Search} \label{subsubsec:quiet}
+{\it Implemented from \textbf{https://chessprogramming.wikispaces.com/Quiescence+Search}}\\ \\
+In order to make sure that the {\it horizon effect} is not causing unnecessary sacrifices, we check every non-quiescent position and extend the search until we land on a quiescent position. In this implementation, I consider captures non-quiescent positions. To do this, \textsc{Quiescnece-Search} runs a reduced \textsc{Minimax} search with alpha-beta and delta pruning. Here is the code for the max part of the search (the min version is analogous): \\
+
+\begin{lstlisting}[firstnumber=513]
+// beta cutoff
+if (standPat >= b) {
+  return standPat;
+}
+
+for (int i = 0; i < capturingMoves.length; i++) {
+  move = capturingMoves[i];
+  
+  position.doMove(move);
+  counter = quiescenceSearch(position, a, b, d);
+  
+  v = Math.max(counter, v);
+  
+  position.undoMove();
+  
+  if (v >= b) {
+    return v;
+  }
+  
+  bigDelta = 975.0; // queen eval
+  if (Move.isPromotion(move)) {
+    bigDelta += 775.0;
+  }
+  
+  // delta cutoff
+  // if not near the end of the game
+  if (v < 2000.0 && v < a - bigDelta) {
+     return a;
+  }
+    
+  a = Math.max(a, v);
+}
+\end{lstlisting}
+We know we have a quiescent position when \verb`standPat` $\geq$ \verb`b`, so we keep searching until that happens. Although these trees can grow quite large as well, the size of the trees decreases as less pieces are available. So to make it more efficient, we ignore moves that are not good enough to make up for the loss of a queen in  lines 532-541, which serves as a good parameter to evaluate captures. Near the end of the game, there are relatively few captures to be made, so we deactivate delta pruning at this point because it no longer makes sense.
+
+\subsubsection{Move ordering}
+Before exploring the child min moves and max moves in \textsc{Max-Value} and \textsc{Min-Value}, respectively, these moves are ordered in a convenient way to make the alpha-beta pruning more efficient. In \textsc{Max-Value}, we sort the moves in decreasing evaluation values, and in \textsc{Max-Value}, we do the opposite. Here is the code for the move ordering in \textsc{Max-Value}:\\
+
+\begin{lstlisting}[firstnumber=297]
+// MOVE ORDERING
+move = moves[0];
+position.doMove(move);
+
+while (evalValues.containsKey(position) && j < moves.length) {
+  orderedMovesHeap.insert(new 
+  FibonacciHeapNode<EvalMove>(new EvalMove(move, 
+  evalValues.get(position))));
+  
+  position.undoMove();
+  
+  if (j < moves.length) {
+    move = moves[j++];
+    position.doMove(move);
+  } else {
+    j++;
+  }
+}
+
+if (j > 1) {
+  if (orderedMovesHeap.size() == moves.length) {
+    canOrder = true;
+  }
+}
+
+position.undoMove();
+\end{lstlisting}
+The Fibonacci Heap takes care of the sorting, and here is its initialization:\\
+
+\begin{lstlisting}[firstnumber=289]
+comparator = new EvalMoveComparator(-1);
+PriorityFibonacciHeap<EvalMove> orderedMovesHeap = 
+      new PriorityFibonacciHeap<EvalMove>(comparator);
+\end{lstlisting}
+The \verb`comparator` instantiates \verb`EvalMoveComparator` with an integer, 1 or -1, to represent increasing and decreasing orders, respectively. Once this is ready, the \textbf{while} loop in lines 301-314 inserts all possible moves into the fib-heap but only if they're already in the transposition table, \verb`evalValues`, because otherwise, the ordering would actually hurt the efficiency of the search. If all necessary moves were found in \verb`evalValues`, then lines 316-320 toggle the boolean \verb`canOrder` to \textbf{true} so that in the actual alpha-beta pruning search we know if we can get the next move from the ordered heap or if we need to resort to normal ordering: \\
+
+\begin{lstlisting}[firstnumber=343]
+x = canOrder ? orderedMovesHeap.poll().getValue() : null;
+  
+move = canOrder ? x.getMove() : moves[i];
+\end{lstlisting}
+
+\subsubsection{Null-move pruning}
+{\it Implemented from \textbf{https://chessprogramming.wikispaces.com/Null+Move+Pruning}}\\ \\
+As a forward-pruning method, null-move pruning makes the search more efficient by simulating a \verb`Move.NO_MOVE` from the current player and then seeing if even with that largely disadvantageous move, the search can still reach a satisfactory cutoff evaluation value (which would of course be to a shallower depth, since a null-move is equivalent to decreasing \verb`maxDepth` by 1). If the search is able to accomplish this, then we know there's no point exploring a larger tree, so we just cutoff the search. This process gets done every recursion of both \textsc{Max-Value} and \textsc{Min-Value} to cutoff unnecessary trees, where the codes for the two methods are once again analogous to each other. Here is the code for null-move pruning in \textsc{Max-Value}: \\
+
+\begin{lstlisting}[firstnumber=324]
+// NULL-MOVE PRUNING  
+if (position.isCheck() && position.getToPlay() == computerId) {
+  v = Double.NEGATIVE_INFINITY;
+} else {
+  position.setToPlay(0);
+  v = minValue(position, d+1, maxDepth, a, b);
+  position.setToPlay(computerId);
+}
+
+if (v > Double.NEGATIVE_INFINITY) {
+  if (v >= b) {
+    return v;
+  } else {
+    v = Double.NEGATIVE_INFINITY;
+  }
+}
+\end{lstlisting}
+Since I wasn't able to make Chesspresso allow a \verb`Move.NO_MOVE` for either player, I equivalently give the turn to the next player. Once the cutoff value for this shallower search has been obtained in line 329, we check if the value is good to cutoff the current search tree in lines 333-339.
+
+\subsection{Evaluation function with Transposition Table}
+{\it Idea from \textbf{Artificial Intelligence: A modern approach}}\\ \\
+Here is the code for the evaluation function I'm using:\\
+
+\begin{lstlisting}[firstnumber=324]
+Double material;
+  
+// TRANSPOSITION TABLE
+if (evalValues.containsKey(position.hashCode())) {
+  // repeated positions are less valuable
+  material = evalValues.get(position.hashCode()) - PENALTY;
+} else {
+  // more weight on the material
+  material = position.getMaterial() + position.getDomination()
+    / RATIO;
+  evalValues.put(position.hashCode(), material);
+}
+
+if (position.getToPlay() == computerId) {
+  return material;
+}
+
+return material * -1;
+\end{lstlisting}
+
+Chesspresso conveniently provides the three key pieces for this evaluation: 
+\begin{enumerate}
+  \item The position's \verb`hashCode`
+  \item The position's \verb`getMaterial` method
+  \item The position's \verb`getDomination` method
+\end{enumerate}
+The first item provides the necessary keys to create the transposition table and thus drastically speed up running time. The last two items determine how valuable is a position, and I just simply ranked them according to what I considered more important. Since I consider defense more important than offense (mostly because the computer doesn't make the first move), I add only a fraction of the position's domination (how much has the player destroyed the other player) to the the position's material. Although I initially considered taking into account other factors such as the possibility of a castle, good pawn structure, etc. but I realized that it works well enough as it is.
+
+\end{document}
